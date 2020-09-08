@@ -4,13 +4,13 @@ global gpsCode2048;
 global_init();
 % IfFreq = 2e6;
 % Fs = 19.2e6;
+
+file = fopen('./if3p996e6fs16p369e6.dat','r');%MSB->LSB:Gdata1->Gdata4
 IfFreq = 3.996E6;
 Fs = 16.369E6;
 data_per_byte = 2;
-
-read_Ms_cnt = 400;%unit ms
+read_Ms_cnt = 2000;%unit ms
 BufferSize = ceil((read_Ms_cnt*1e-3)*Fs*(1/data_per_byte));%each byte 4 data unit byte
-file = fopen('./if3p996e6fs16p369e6.dat','r');%MSB->LSB:Gdata1->Gdata4
 [SigBuf,count] = fread(file,BufferSize,'uint8');
 
 IfData = zeros(1,data_per_byte*count);
@@ -77,55 +77,75 @@ for sv=5,
 %% initial sv2 -2500 817 sv5 -1500 1204
     acqres.doppler = -1500;%-2500
     acqres.cdph = 1204;%817;
-    Ip_old = 0;
-    Qp_old = 0;
+
     total_ms = read_Ms_cnt - 1;
     freq_change = 0;
-    Ms_cnt = 1;
+    cdph_change = 0;
+    
     CAcode1023 = cacode_gen(sv);
     CarrierNcoStep = -acqres.doppler/DownSampleRate * 2^32;
     if CarrierNcoStep < 0,
         CarrierNcoStep = 2^32 + CarrierNcoStep;
-    end
-    CarrierNcoPhase = 0;
+    end    
     CodeNcoStep = (1.023e6+acqres.doppler/1540)/DownSampleRate * 2^32;
-    CodeNcoPhase = 0;
-    codeidx = 0;
+    
+    CarrierNcoPhaseE = 0;
+    CarrierNcoPhaseP = 0;
+    CarrierNcoPhaseL = 0;
+    CodeNcoPhaseE = 0;
+    CodeNcoPhaseP = 0;
+    CodeNcoPhaseL = 0;
+    codeidxE = 0;
+    codeidxP = 0;
+    codeidxL = 0;
+    delta_cdph_old = 0;
+    Ip_old = 0;
+    Qp_old = 0;
     for i=1:1:total_ms
-%% early
-%         I_InData = I_Data(2048-acqres.cdph+1:2048-acqres.cdph+1+2048*Ms_cnt);
-%         Q_InData = Q_Data(2048-acqres.cdph+1:2048-acqres.cdph+1+2048*Ms_cnt);
-%         [Ie,Qe,codeNcoe,carrierNcoe] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhase,CodeNcoPhase,Ms_cnt);
-%% prompt I_Data eq.   2048-start = (acqres.cdph-1) - 1
         CarrierNcoStep = CarrierNcoStep-freq_change/DownSampleRate * 2^32;
+        CodeNcoStep = CodeNcoStep + cdph_change/DownSampleRate * 2^32;
+        Ms_cnt = 1;
+%% early
+        I_InData = I_Data(2048-acqres.cdph+1:2048-acqres.cdph+1+2048*Ms_cnt);
+        Q_InData = Q_Data(2048-acqres.cdph+1:2048-acqres.cdph+1+2048*Ms_cnt);
+        [Ie,Qe,codeNcoE,carrierNcoE,CodeIdxE] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseE,CodeNcoPhaseE,Ms_cnt,0,0,codeidxE);
+        codeidxE = CodeIdxE;
+        CarrierNcoPhaseE = carrierNcoE;
+        CodeNcoPhaseE = codeNcoE;
+%% prompt I_Data eq.   2048-start = (acqres.cdph-1) - 1        
         I_InData = I_Data(2048-acqres.cdph+2:2048-acqres.cdph+2+2048*Ms_cnt);
         Q_InData = Q_Data(2048-acqres.cdph+2:2048-acqres.cdph+2+2048*Ms_cnt);
-        [Ip,Qp,codeNcoP,carrierNcoP,CodeIdx] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhase,CodeNcoPhase,Ms_cnt,0,0,codeidx);
-        codeidx = CodeIdx;
-        CarrierNcoPhase = carrierNcoP;
-        CodeNcoPhase = codeNcoP;
+        [Ip,Qp,codeNcoP,carrierNcoP,CodeIdxP] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseP,CodeNcoPhaseP,Ms_cnt,0,0,codeidxP);
+        codeidxP = CodeIdxP;
+        CarrierNcoPhaseP = carrierNcoP;
+        CodeNcoPhaseP = codeNcoP;
 %% late
-%         I_InData = I_Data(2048-acqres.cdph+3:2048-acqres.cdph+3+2048*Ms_cnt);
-%         Q_InData = Q_Data(2048-acqres.cdph+3:2048-acqres.cdph+3+2048*Ms_cnt);
-%         [Il,Ql,codeNcol,carrierNcol] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhase,CodeNcoPhase,Ms_cnt);
-%%
-
-%         sqrt(Ie^2+Qe^2)
-%         sqrt(Ip^2+Qp^2)
-%         sqrt(Il^2+Ql^2)
-%% Discriminator
+        I_InData = I_Data(2048-acqres.cdph+3:2048-acqres.cdph+3+2048*Ms_cnt);
+        Q_InData = Q_Data(2048-acqres.cdph+3:2048-acqres.cdph+3+2048*Ms_cnt);
+        [Il,Ql,codeNcoL,carrierNcoL,CodeIdxL] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseL,CodeNcoPhaseL,Ms_cnt,0,0,codeidxL);
+        codeidxL = CodeIdxL;
+        CarrierNcoPhaseL = carrierNcoL;
+        CodeNcoPhaseL = codeNcoL;
+%% code phase discriminator
+        SE = sqrt(Ie^2+Qe^2);
+        SP = sqrt(Ip^2+Qp^2);
+        SL = sqrt(Il^2+Ql^2);
+        delta_cdph(i) = (SE - SL)/SP;        
+        cdph_change = delta_cdph(i)*0.2 + (delta_cdph(i) - delta_cdph_old)*1;
+        delta_cdph_old = delta_cdph(i);
+%% freq discriminator
         dot_p = Ip_old * Ip + Qp_old * Qp;
         cross_p = Ip_old * Qp - Qp_old * Ip;
-%         atan2(Qp,Ip)
         delta_freq(i) = atan2(cross_p,dot_p)/(2*pi*Ms_cnt*1e-3); 
-        freq_change = delta_freq(i) * 0.05;
-%%
-
-%%
+        freq_change = delta_freq(i) * 0.05;        
         Ip_old = Ip;
         Qp_old = Qp;
+%%
         I_Data = I_Data(2048+1:end);
         Q_Data = Q_Data(2048+1:end);
     end
+    figure(1);
+    plot(delta_cdph);
+    figure(2);
     plot(delta_freq);
 end
