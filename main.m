@@ -9,7 +9,7 @@ file = fopen('./if3p996e6fs16p369e6.dat','r');%MSB->LSB:Gdata1->Gdata4
 IfFreq = 3.996E6;
 Fs = 16.369E6;
 data_per_byte = 2;
-read_Ms_cnt = 2000;%unit ms
+read_Ms_cnt = 400;%unit ms
 BufferSize = ceil((read_Ms_cnt*1e-3)*Fs*(1/data_per_byte));%each byte 4 data unit byte
 [SigBuf,count] = fread(file,BufferSize,'uint8');
 
@@ -74,7 +74,7 @@ for sv=5,
 %     acqres.doppler = -((doppler - 1)*FreqStep + StartFreq);%-2500
 %     acqres.cdph = cdph;%817
 %% Tracking base the result of timedomain 
-%% initial sv2 -2500 817 sv5 -1500 1204
+%% initial sv2 -2500 817 sv5 -1500 1204  PULLIN
     acqres.doppler = -1500;%-2500
     acqres.cdph = 1204;%817;
 
@@ -131,7 +131,7 @@ for sv=5,
         SP = sqrt(Ip^2+Qp^2);
         SL = sqrt(Il^2+Ql^2);
         delta_cdph(i) = (SE - SL)/SP;        
-        cdph_change = delta_cdph(i)*0.2 + (delta_cdph(i) - delta_cdph_old)*1;
+        cdph_change = delta_cdph(i)*0.4 + (delta_cdph(i) - delta_cdph_old)*2;
         delta_cdph_old = delta_cdph(i);
 %% freq discriminator
         dot_p = Ip_old * Ip + Qp_old * Qp;
@@ -148,4 +148,70 @@ for sv=5,
     plot(delta_cdph);
     figure(2);
     plot(delta_freq);
+%% get new data for TRACKING
+    while 1
+        read_Ms_cnt = 400;%unit ms
+        BufferSize = ceil((read_Ms_cnt*1e-3)*Fs*(1/data_per_byte));%each byte 4 data unit byte
+        [SigBuf,count] = fread(file,BufferSize,'uint8');
+
+        if count < BufferSize
+            break;
+        end
+        IfData = zeros(1,data_per_byte*count);
+        for n=1:count,
+            IfData(2*n-1) = Convertbit(SigBuf(n),2);
+            IfData(2*n) = Convertbit(SigBuf(n),0);
+        end
+        [I_tmp,Q_tmp] = Downsample(IfData,size(IfData,2),DownSampleRate,0,Fs,IfFreq);
+        I_Data = [I_Data I_tmp];
+        Q_Data = [Q_Data Q_tmp];
+        total_ms = read_Ms_cnt;
+        for i=1:1:total_ms
+            CarrierNcoStep = CarrierNcoStep-freq_change/DownSampleRate * 2^32;
+            CodeNcoStep = CodeNcoStep + cdph_change/DownSampleRate * 2^32;
+%% early
+            I_InData = I_Data(2048-acqres.cdph+1:2048-acqres.cdph+1+2048*Ms_cnt);
+            Q_InData = Q_Data(2048-acqres.cdph+1:2048-acqres.cdph+1+2048*Ms_cnt);
+            [Ie,Qe,codeNcoE,carrierNcoE,CodeIdxE] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseE,CodeNcoPhaseE,Ms_cnt,0,0,codeidxE);
+            codeidxE = CodeIdxE;
+            CarrierNcoPhaseE = carrierNcoE;
+            CodeNcoPhaseE = codeNcoE;
+%% prompt I_Data eq.   2048-start = (acqres.cdph-1) - 1        
+            I_InData = I_Data(2048-acqres.cdph+2:2048-acqres.cdph+2+2048*Ms_cnt);
+            Q_InData = Q_Data(2048-acqres.cdph+2:2048-acqres.cdph+2+2048*Ms_cnt);
+            [Ip,Qp,codeNcoP,carrierNcoP,CodeIdxP] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseP,CodeNcoPhaseP,Ms_cnt,0,0,codeidxP);
+            codeidxP = CodeIdxP;
+            CarrierNcoPhaseP = carrierNcoP;
+            CodeNcoPhaseP = codeNcoP;
+%% late
+            I_InData = I_Data(2048-acqres.cdph+3:2048-acqres.cdph+3+2048*Ms_cnt);
+            Q_InData = Q_Data(2048-acqres.cdph+3:2048-acqres.cdph+3+2048*Ms_cnt);
+            [Il,Ql,codeNcoL,carrierNcoL,CodeIdxL] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseL,CodeNcoPhaseL,Ms_cnt,0,0,codeidxL);
+            codeidxL = CodeIdxL;
+            CarrierNcoPhaseL = carrierNcoL;
+            CodeNcoPhaseL = codeNcoL;
+%% code phase discriminator
+            SE = sqrt(Ie^2+Qe^2);
+            SP = sqrt(Ip^2+Qp^2);
+            SL = sqrt(Il^2+Ql^2);
+            delta_cdph(i) = (SE - SL)/SP;        
+            cdph_change = delta_cdph(i)*0.2 + (delta_cdph(i) - delta_cdph_old)*1;
+            delta_cdph_old = delta_cdph(i);
+%% cdph discriminator
+            dot_p = Ip_old * Ip + Qp_old * Qp;
+            cross_p = Ip_old * Qp - Qp_old * Ip;
+            delta_freq(i) = atan2(cross_p,dot_p)/(2*pi*Ms_cnt*1e-3); 
+            freq_change = delta_freq(i) * 0.05;        
+            Ip_old = Ip;
+            Qp_old = Qp;
+%%
+            I_Data = I_Data(2048+1:end);
+            Q_Data = Q_Data(2048+1:end);
+        end
+        figure(1);
+        plot(delta_cdph(1:total_ms));
+        figure(2);
+        plot(delta_freq(1:total_ms));
+        pause;
+    end
 end
