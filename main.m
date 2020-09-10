@@ -1,6 +1,7 @@
 clc;clear;close all;
 
 global gpsCode2048;
+global LUT;
 global_init();
 % IfFreq = 2e6;
 % Fs = 19.2e6;
@@ -9,7 +10,7 @@ file = fopen('./if3p996e6fs16p369e6.dat','r');%MSB->LSB:Gdata1->Gdata4
 IfFreq = 3.996E6;
 Fs = 16.369E6;
 data_per_byte = 2;
-read_Ms_cnt = 400;%unit ms
+read_Ms_cnt = 500;%unit ms
 BufferSize = ceil((read_Ms_cnt*1e-3)*Fs*(1/data_per_byte));%each byte 4 data unit byte
 [SigBuf,count] = fread(file,BufferSize,'uint8');
 
@@ -19,8 +20,10 @@ for n=1:count,
 %    IfData(4*n-2) = Convertbit(SigBuf(n),2);
 %    IfData(4*n-1) = Convertbit(SigBuf(n),1);
 %    IfData(4*n) = Convertbit(SigBuf(n),0);
-    IfData(2*n-1) = Convertbit(SigBuf(n),2);
-    IfData(2*n) = Convertbit(SigBuf(n),0);
+%     IfData(2*n-1) = Convertbit(SigBuf(n),2);
+%     IfData(2*n) = Convertbit(SigBuf(n),0);
+    IfData(2*n-1) = LUT(SigBuf(n)+1,2);
+    IfData(2*n) = LUT(SigBuf(n)+1,4);
 end
 
 DownSampleRate = 2.048e6;
@@ -101,6 +104,11 @@ for sv=5,
     delta_cdph_old = 0;
     Ip_old = 0;
     Qp_old = 0;
+    ms_counter = 1;% range 1-20
+    bitedge = zeros(1,20);
+    delta_freq_old = 0;
+    cnta = 1;
+    cntb = 1;
     for i=1:1:total_ms
         CarrierNcoStep = CarrierNcoStep-freq_change/DownSampleRate * 2^32;
         CodeNcoStep = CodeNcoStep + cdph_change/DownSampleRate * 2^32;
@@ -131,36 +139,49 @@ for sv=5,
         SP = sqrt(Ip^2+Qp^2);
         SL = sqrt(Il^2+Ql^2);
         delta_cdph(i) = (SE - SL)/SP;        
-        cdph_change = delta_cdph(i)*0.4 + (delta_cdph(i) - delta_cdph_old)*2;
+        cdph_change = delta_cdph(i)*0.5 + (delta_cdph(i) - delta_cdph_old)*2;
         delta_cdph_old = delta_cdph(i);
 %% freq discriminator
         dot_p = Ip_old * Ip + Qp_old * Qp;
         cross_p = Ip_old * Qp - Qp_old * Ip;
         delta_freq(i) = atan2(cross_p,dot_p)/(2*pi*Ms_cnt*1e-3); 
-        freq_change = delta_freq(i) * 0.05;        
+        if abs(delta_freq(i) - delta_freq_old)<250
+            freq_change = delta_freq(i) * 0.05;        
+        end
+        delta_freq_old = delta_freq(i);
+        theta_1(cnta) = atan2(Qp,Ip);
+        cnta = cnta+1;
         Ip_old = Ip;
         Qp_old = Qp;
 %%
         I_Data = I_Data(2048+1:end);
         Q_Data = Q_Data(2048+1:end);
+        ms_counter = mod(ms_counter,20) + 1;
     end
     figure(1);
     plot(delta_cdph);
     figure(2);
     plot(delta_freq);
+    figure(3);
+    plot(theta_1);
 %% get new data for TRACKING
+    phd_old = 0;
+    bitedge_done = 0;
+    I_buffer = zeros(1,total_ms);
+    Q_buffer = zeros(1,total_ms);
     while 1
-        read_Ms_cnt = 400;%unit ms
+        read_Ms_cnt = 1000;%unit ms
         BufferSize = ceil((read_Ms_cnt*1e-3)*Fs*(1/data_per_byte));%each byte 4 data unit byte
         [SigBuf,count] = fread(file,BufferSize,'uint8');
-
         if count < BufferSize
             break;
         end
         IfData = zeros(1,data_per_byte*count);
         for n=1:count,
-            IfData(2*n-1) = Convertbit(SigBuf(n),2);
-            IfData(2*n) = Convertbit(SigBuf(n),0);
+%             IfData(2*n-1) = Convertbit(SigBuf(n),2);
+%             IfData(2*n) = Convertbit(SigBuf(n),0);
+            IfData(2*n-1) = LUT(SigBuf(n)+1,2);
+            IfData(2*n) = LUT(SigBuf(n)+1,4);
         end
         [I_tmp,Q_tmp] = Downsample(IfData,size(IfData,2),DownSampleRate,0,Fs,IfFreq);
         I_Data = [I_Data I_tmp];
@@ -168,7 +189,7 @@ for sv=5,
         total_ms = read_Ms_cnt;
         for i=1:1:total_ms
             CarrierNcoStep = CarrierNcoStep-freq_change/DownSampleRate * 2^32;
-            CodeNcoStep = CodeNcoStep + cdph_change/DownSampleRate * 2^32;
+            CodeNcoStep = CodeNcoStep + cdph_change/DownSampleRate * 2^32 + (freq_change/1540)/DownSampleRate * 2^32;
 %% early
             I_InData = I_Data(2048-acqres.cdph+1:2048-acqres.cdph+1+2048*Ms_cnt);
             Q_InData = Q_Data(2048-acqres.cdph+1:2048-acqres.cdph+1+2048*Ms_cnt);
@@ -195,23 +216,70 @@ for sv=5,
             SP = sqrt(Ip^2+Qp^2);
             SL = sqrt(Il^2+Ql^2);
             delta_cdph(i) = (SE - SL)/SP;        
-            cdph_change = delta_cdph(i)*0.2 + (delta_cdph(i) - delta_cdph_old)*1;
+            cdph_change = delta_cdph(i)*0.02 + (delta_cdph(i) - delta_cdph_old)*0.1;
             delta_cdph_old = delta_cdph(i);
-%% cdph discriminator
-            dot_p = Ip_old * Ip + Qp_old * Qp;
-            cross_p = Ip_old * Qp - Qp_old * Ip;
-            delta_freq(i) = atan2(cross_p,dot_p)/(2*pi*Ms_cnt*1e-3); 
-            freq_change = delta_freq(i) * 0.05;        
+%% cdph discriminator        
+            if bitedge_done == 0 %no bitsync 
+                dot_p = Ip_old * Ip + Qp_old * Qp;
+                cross_p = Ip_old * Qp - Qp_old * Ip;
+                delta_freq(i) = atan2(cross_p,dot_p)/(2*pi*Ms_cnt*1e-3);
+                if abs(delta_freq(i) - delta_freq_old)<250
+                    freq_change = delta_freq(i) * 0.005 ;
+                end
+                delta_freq_old = delta_freq(i);
+                theta_2(cntb) = atan2(Qp,Ip);
+                cntb = cntb + 1;
+            else
+                sum_5ms_I = sum_5ms_I + Ip;
+                sum_5ms_Q = sum_5ms_Q + Qp;
+                I_buffer = [I_buffer(2:end) Ip];
+                Q_buffer = [Q_buffer(2:end) Qp];
+                figure(4);
+                plot(I_buffer);
+                figure(5);
+                plot(Q_buffer);
+                pause(0.001);
+                if mod(ms_counter,5) == 0   
+%                     IQ_theta(t_cnt) = atan2(sum_20ms_Q,sum_20ms_I);
+                    if sum_5ms_I > 0
+                        phd(t_cnt) = sum_5ms_Q/sqrt(sum_5ms_I^2+sum_5ms_Q^2);
+                    else
+                        phd(t_cnt) = -sum_5ms_Q/sqrt(sum_5ms_I^2+sum_5ms_Q^2);
+                    end
+                    freq_change = (phd(t_cnt) - phd_old)*0.04 + ...
+                        phd(t_cnt) * 0.002;
+                    phd_old = phd(t_cnt);
+                    sum_5ms_I = 0;
+                    sum_5ms_Q = 0;
+                    t_cnt = t_cnt + 1;
+                    figure(6);
+                    plot(phd);
+                end
+            end
             Ip_old = Ip;
             Qp_old = Qp;
-%%
-            I_Data = I_Data(2048+1:end);
-            Q_Data = Q_Data(2048+1:end);
+%% push data in and do bitsync
+            I_Data = I_Data(2048*Ms_cnt+1:end);
+            Q_Data = Q_Data(2048*Ms_cnt+1:end);
+            if dot_p < 0 && i<501 && bitedge_done == 0
+                bitedge(ms_counter) = bitedge(ms_counter) + 1;
+            end
+            if i == 501 && bitedge_done == 0
+                [amp mscounter] = max(bitedge);%TODO
+                ms_counter = ms_counter - (mscounter - 1);
+                bitedge_done = 1;
+                sum_5ms_I = 0;
+                sum_5ms_Q = 0;
+                t_cnt = 1;
+            end  
+            ms_counter = mod(ms_counter,20) + 1;
         end
-        figure(1);
-        plot(delta_cdph(1:total_ms));
-        figure(2);
-        plot(delta_freq(1:total_ms));
-        pause;
+%         figure(1);
+%         plot(delta_cdph(1:total_ms));
+%         figure(2);
+%         plot(delta_freq);
+%         figure(3);
+%         plot(IQ_theta);
+%         pause(0.0001);
     end
 end
