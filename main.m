@@ -109,6 +109,8 @@ for sv=5,
     delta_freq_old = 0;
     cnta = 1;
     cntb = 1;
+    cntc = 1;
+    cntd = 1;
     for i=1:1:total_ms
         CarrierNcoStep = CarrierNcoStep-freq_change/DownSampleRate * 2^32;
         CodeNcoStep = CodeNcoStep + cdph_change/DownSampleRate * 2^32;
@@ -158,17 +160,20 @@ for sv=5,
         Q_Data = Q_Data(2048+1:end);
         ms_counter = mod(ms_counter,20) + 1;
     end
-    figure(1);
-    plot(delta_cdph);
-    figure(2);
-    plot(delta_freq);
-    figure(3);
-    plot(theta_1);
+%     figure(1);
+%     plot(delta_cdph);
+%     figure(2);
+%     plot(delta_freq);
+%     figure(3);
+%     plot(theta_1);
 %% get new data for TRACKING
     phd_old = 0;
     bitedge_done = 0;
     I_buffer = zeros(1,total_ms);
     Q_buffer = zeros(1,total_ms);
+    BN = 0.5;
+    c1 = (BN/0.53)^2;
+    c2 = 1.414*BN/0.53;
     while 1
         read_Ms_cnt = 1000;%unit ms
         BufferSize = ceil((read_Ms_cnt*1e-3)*Fs*(1/data_per_byte));%each byte 4 data unit byte
@@ -212,15 +217,17 @@ for sv=5,
             CarrierNcoPhaseL = carrierNcoL;
             CodeNcoPhaseL = codeNcoL;
 %% code phase discriminator
-            SE = sqrt(Ie^2+Qe^2);
-            SP = sqrt(Ip^2+Qp^2);
-            SL = sqrt(Il^2+Ql^2);
-            delta_cdph(i) = (SE - SL)/SP;        
-            cdph_change = delta_cdph(i)*0.02 + (delta_cdph(i) - delta_cdph_old)*0.1;
-            delta_cdph_old = delta_cdph(i);
+            
 %% cdph discriminator        
             if bitedge_done == 0 %no bitsync 
-                dot_p = Ip_old * Ip + Qp_old * Qp;
+                SE = sqrt(Ie^2+Qe^2);% code loop
+                SP = sqrt(Ip^2+Qp^2);
+                SL = sqrt(Il^2+Ql^2);
+                delta_cdph(i) = (SE - SL)/SP;        
+                cdph_change = delta_cdph(i)*0.02 + (delta_cdph(i) - delta_cdph_old)*0.1;
+                delta_cdph_old = delta_cdph(i);
+                
+                dot_p = Ip_old * Ip + Qp_old * Qp;%carrier loop
                 cross_p = Ip_old * Qp - Qp_old * Ip;
                 delta_freq(i) = atan2(cross_p,dot_p)/(2*pi*Ms_cnt*1e-3);
                 if abs(delta_freq(i) - delta_freq_old)<250
@@ -229,32 +236,75 @@ for sv=5,
                 delta_freq_old = delta_freq(i);
                 theta_2(cntb) = atan2(Qp,Ip);
                 cntb = cntb + 1;
-            else
-                sum_5ms_I = sum_5ms_I + Ip;
-                sum_5ms_Q = sum_5ms_Q + Qp;
+%                 figure(4);
+%                 plot(delta_cdph);
+            else                
+                sum_20ms_Ie = sum_20ms_Ie + Ie;
+                sum_20ms_Qe = sum_20ms_Qe + Qe;
+                sum_20ms_Ip = sum_20ms_Ip + Ip;
+                sum_20ms_Qp = sum_20ms_Qp + Qp;
+                sum_20ms_Il = sum_20ms_Il + Il;
+                sum_20ms_Ql = sum_20ms_Ql + Ql;
+                sum_10ms_Ie = sum_10ms_Ie + Ie;
+                sum_10ms_Qe = sum_10ms_Qe + Qe;
+                sum_10ms_Ip = sum_10ms_Ip + Ip;
+                sum_10ms_Qp = sum_10ms_Qp + Qp;
+                sum_10ms_Il = sum_10ms_Il + Il;
+                sum_10ms_Ql = sum_10ms_Ql + Ql;
+                if mod(ms_counter,10) == 0   %10ms carrier loop
+                    if sum_10ms_Ip > 0
+                        phd(t_cnt) = sum_10ms_Qp/sqrt(sum_10ms_Ip^2+sum_10ms_Qp^2);
+                    else
+                        phd(t_cnt) = -sum_10ms_Qp/sqrt(sum_10ms_Ip^2+sum_10ms_Qp^2);
+                    end
+%                     freq_change = (phd(t_cnt) - phd_old)*0.04+ ...
+%                         phd(t_cnt) * 0.002;
+                    freq_change = (phd(t_cnt) - phd_old)*c2+ ...
+                        phd(t_cnt) * c1 * 0.01;
+                    phd_old = phd(t_cnt);                    
+                    t_cnt = t_cnt + 1;
+                    sum_10ms_Ie = 0;
+                    sum_10ms_Qe = 0;
+                    sum_10ms_Ip = 0;
+                    sum_10ms_Qp = 0;
+                    sum_10ms_Il = 0;
+                    sum_10ms_Ql = 0;
+                    freq_chage_tmp (cntd) = freq_change;
+                    cntd = cntd + 1;
+                    figure(5);
+                    plot(phd);
+                    title('phd');
+                    figure(6);
+                    plot(freq_chage_tmp);
+                    title('freq chage tmp');
+                end
+                if mod(ms_counter,20) == 0  %20ms code loop
+                    magE20ms = sqrt(sum_20ms_Ie^2+sum_20ms_Qe^2);
+                    magL20ms = sqrt(sum_20ms_Il^2+sum_20ms_Ql^2);
+                    delta_cdph2(cntc) = 0.5* (magE20ms - magL20ms) / (magE20ms + magL20ms);
+                    cdph_change = delta_cdph2(cntc)*0.2 + (delta_cdph2(cntc) - delta_cdph_old)*0.8;    
+%                     cdph_change = delta_cdph2(cntc)*0.2;
+                    delta_cdph_old = delta_cdph2(cntc);
+                    cntc = cntc + 1;
+                    sum_20ms_Ie = 0;
+                    sum_20ms_Qe = 0;
+                    sum_20ms_Ip = 0;
+                    sum_20ms_Qp = 0;
+                    sum_20ms_Il = 0;
+                    sum_20ms_Ql = 0;
+                    figure(7);
+                    plot(delta_cdph2);
+                    title('delta cdph2');
+                end
                 I_buffer = [I_buffer(2:end) Ip];
                 Q_buffer = [Q_buffer(2:end) Qp];
-                figure(4);
-                plot(I_buffer);
-                figure(5);
-                plot(Q_buffer);
+                figure(8);
+                plot(I_buffer,'r');
+                hold on;
+                plot(Q_buffer,'b');
+                title('I red,Q blue');
+                hold off;
                 pause(0.001);
-                if mod(ms_counter,5) == 0   
-%                     IQ_theta(t_cnt) = atan2(sum_20ms_Q,sum_20ms_I);
-                    if sum_5ms_I > 0
-                        phd(t_cnt) = sum_5ms_Q/sqrt(sum_5ms_I^2+sum_5ms_Q^2);
-                    else
-                        phd(t_cnt) = -sum_5ms_Q/sqrt(sum_5ms_I^2+sum_5ms_Q^2);
-                    end
-                    freq_change = (phd(t_cnt) - phd_old)*0.04 + ...
-                        phd(t_cnt) * 0.002;
-                    phd_old = phd(t_cnt);
-                    sum_5ms_I = 0;
-                    sum_5ms_Q = 0;
-                    t_cnt = t_cnt + 1;
-                    figure(6);
-                    plot(phd);
-                end
             end
             Ip_old = Ip;
             Qp_old = Qp;
@@ -268,8 +318,18 @@ for sv=5,
                 [amp mscounter] = max(bitedge);%TODO
                 ms_counter = ms_counter - (mscounter - 1);
                 bitedge_done = 1;
-                sum_5ms_I = 0;
-                sum_5ms_Q = 0;
+                sum_20ms_Ie = 0;
+                sum_20ms_Qe = 0;
+                sum_20ms_Ip = 0;
+                sum_20ms_Qp = 0;
+                sum_20ms_Il = 0;
+                sum_20ms_Ql = 0;
+                sum_10ms_Ie = 0;
+                sum_10ms_Qe = 0;
+                sum_10ms_Ip = 0;
+                sum_10ms_Qp = 0;
+                sum_10ms_Il = 0;
+                sum_10ms_Ql = 0;
                 t_cnt = 1;
             end  
             ms_counter = mod(ms_counter,20) + 1;
