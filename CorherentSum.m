@@ -1,5 +1,5 @@
 function [Sum_I,Sum_Q,CodeNcoPhase,CarrierNcoPhase,CodeIdx] = CorherentSum(Input_I,Input_Q,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhase...
-    ,CodeNcoPhase,Ms,sum_I,sum_Q,codeidx)
+    ,CodeNcoPhase,Ms,sum_I,sum_Q,codeidx,Downsamplerate)
 %CORHERENTSUM 此处显示有关此函数的摘要
 %   此处显示详细说明
 global sin_table;
@@ -10,7 +10,7 @@ global cos_table;
     CodeIdx = codeidx;
     CodeNcoPhaseOld = CodeNcoPhase;
 
-    for n=1:1:2048*Ms
+    for n=1:1:Downsamplerate*Ms*1e-3
         CodeNcoPhase = mod(CodeNcoPhase + CodeNcoStep,2^32-1);
         CarrierNcoPhase = mod(CarrierNcoPhase + CarrierNcoStep,2^32-1);
         PhaseIdx = bitand(bitshift(uint32(CarrierNcoPhase),-28),15)+1;

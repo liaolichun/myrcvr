@@ -27,6 +27,7 @@ for n=1:count,
 end
 
 DownSampleRate = 2.048e6;
+ms_sample = DownSampleRate * 1e-3;
 [I_Data,Q_Data] = Downsample(IfData,size(IfData,2),DownSampleRate,0,Fs,IfFreq);
 
 for sv=5,
@@ -84,7 +85,7 @@ for sv=5,
     total_ms = read_Ms_cnt - 1;
     freq_change = 0;
     cdph_change = 0;
-    
+
     CAcode1023 = cacode_gen(sv);
     CarrierNcoStep = -acqres.doppler/DownSampleRate * 2^32;
     if CarrierNcoStep < 0,
@@ -116,23 +117,23 @@ for sv=5,
         CodeNcoStep = CodeNcoStep + cdph_change/DownSampleRate * 2^32;
         Ms_cnt = 1;
 %% early
-        I_InData = I_Data(2048-acqres.cdph+1:2048-acqres.cdph+1+2048*Ms_cnt);
-        Q_InData = Q_Data(2048-acqres.cdph+1:2048-acqres.cdph+1+2048*Ms_cnt);
-        [Ie,Qe,codeNcoE,carrierNcoE,CodeIdxE] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseE,CodeNcoPhaseE,Ms_cnt,0,0,codeidxE);
+        I_InData = I_Data(ms_sample-acqres.cdph+1:ms_sample-acqres.cdph+1+ms_sample*Ms_cnt);
+        Q_InData = Q_Data(ms_sample-acqres.cdph+1:ms_sample-acqres.cdph+1+ms_sample*Ms_cnt);
+        [Ie,Qe,codeNcoE,carrierNcoE,CodeIdxE] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseE,CodeNcoPhaseE,Ms_cnt,0,0,codeidxE,DownSampleRate);
         codeidxE = CodeIdxE;
         CarrierNcoPhaseE = carrierNcoE;
         CodeNcoPhaseE = codeNcoE;
 %% prompt I_Data eq.   2048-start = (acqres.cdph-1) - 1        
-        I_InData = I_Data(2048-acqres.cdph+2:2048-acqres.cdph+2+2048*Ms_cnt);
-        Q_InData = Q_Data(2048-acqres.cdph+2:2048-acqres.cdph+2+2048*Ms_cnt);
-        [Ip,Qp,codeNcoP,carrierNcoP,CodeIdxP] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseP,CodeNcoPhaseP,Ms_cnt,0,0,codeidxP);
+        I_InData = I_Data(ms_sample-acqres.cdph+2:ms_sample-acqres.cdph+2+ms_sample*Ms_cnt);
+        Q_InData = Q_Data(ms_sample-acqres.cdph+2:ms_sample-acqres.cdph+2+ms_sample*Ms_cnt);
+        [Ip,Qp,codeNcoP,carrierNcoP,CodeIdxP] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseP,CodeNcoPhaseP,Ms_cnt,0,0,codeidxP,DownSampleRate);
         codeidxP = CodeIdxP;
         CarrierNcoPhaseP = carrierNcoP;
         CodeNcoPhaseP = codeNcoP;
 %% late
-        I_InData = I_Data(2048-acqres.cdph+3:2048-acqres.cdph+3+2048*Ms_cnt);
-        Q_InData = Q_Data(2048-acqres.cdph+3:2048-acqres.cdph+3+2048*Ms_cnt);
-        [Il,Ql,codeNcoL,carrierNcoL,CodeIdxL] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseL,CodeNcoPhaseL,Ms_cnt,0,0,codeidxL);
+        I_InData = I_Data(ms_sample-acqres.cdph+3:ms_sample-acqres.cdph+3+ms_sample*Ms_cnt);
+        Q_InData = Q_Data(ms_sample-acqres.cdph+3:ms_sample-acqres.cdph+3+ms_sample*Ms_cnt);
+        [Il,Ql,codeNcoL,carrierNcoL,CodeIdxL] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseL,CodeNcoPhaseL,Ms_cnt,0,0,codeidxL,DownSampleRate);
         codeidxL = CodeIdxL;
         CarrierNcoPhaseL = carrierNcoL;
         CodeNcoPhaseL = codeNcoL;
@@ -156,8 +157,8 @@ for sv=5,
         Ip_old = Ip;
         Qp_old = Qp;
 %%
-        I_Data = I_Data(2048+1:end);
-        Q_Data = Q_Data(2048+1:end);
+        I_Data = I_Data(ms_sample+1:end);
+        Q_Data = Q_Data(ms_sample+1:end);
         ms_counter = mod(ms_counter,20) + 1;
     end
 %     figure(1);
@@ -171,9 +172,14 @@ for sv=5,
     bitedge_done = 0;
     I_buffer = zeros(1,total_ms);
     Q_buffer = zeros(1,total_ms);
+    E_buffer = zeros(1,200);
+    P_buffer = zeros(1,200);
+    L_buffer = zeros(1,200);
     BN = 0.5;
     c1 = (BN/0.53)^2;
     c2 = 1.414*BN/0.53;
+
+    ms_sample = DownSampleRate * 1e-3;
     while 1
         read_Ms_cnt = 1000;%unit ms
         BufferSize = ceil((read_Ms_cnt*1e-3)*Fs*(1/data_per_byte));%each byte 4 data unit byte
@@ -196,23 +202,23 @@ for sv=5,
             CarrierNcoStep = CarrierNcoStep-freq_change/DownSampleRate * 2^32;
             CodeNcoStep = CodeNcoStep + cdph_change/DownSampleRate * 2^32 + (freq_change/1540)/DownSampleRate * 2^32;
 %% early
-            I_InData = I_Data(2048-acqres.cdph+1:2048-acqres.cdph+1+2048*Ms_cnt);
-            Q_InData = Q_Data(2048-acqres.cdph+1:2048-acqres.cdph+1+2048*Ms_cnt);
-            [Ie,Qe,codeNcoE,carrierNcoE,CodeIdxE] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseE,CodeNcoPhaseE,Ms_cnt,0,0,codeidxE);
+            I_InData = I_Data(ms_sample-acqres.cdph+1:ms_sample-acqres.cdph+1+ms_sample*Ms_cnt);
+            Q_InData = Q_Data(ms_sample-acqres.cdph+1:ms_sample-acqres.cdph+1+ms_sample*Ms_cnt);
+            [Ie,Qe,codeNcoE,carrierNcoE,CodeIdxE] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseE,CodeNcoPhaseE,Ms_cnt,0,0,codeidxE,DownSampleRate);
             codeidxE = CodeIdxE;
             CarrierNcoPhaseE = carrierNcoE;
             CodeNcoPhaseE = codeNcoE;
 %% prompt I_Data eq.   2048-start = (acqres.cdph-1) - 1        
-            I_InData = I_Data(2048-acqres.cdph+2:2048-acqres.cdph+2+2048*Ms_cnt);
-            Q_InData = Q_Data(2048-acqres.cdph+2:2048-acqres.cdph+2+2048*Ms_cnt);
-            [Ip,Qp,codeNcoP,carrierNcoP,CodeIdxP] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseP,CodeNcoPhaseP,Ms_cnt,0,0,codeidxP);
+            I_InData = I_Data(ms_sample-acqres.cdph+2:ms_sample-acqres.cdph+2+ms_sample*Ms_cnt);
+            Q_InData = Q_Data(ms_sample-acqres.cdph+2:ms_sample-acqres.cdph+2+ms_sample*Ms_cnt);
+            [Ip,Qp,codeNcoP,carrierNcoP,CodeIdxP] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseP,CodeNcoPhaseP,Ms_cnt,0,0,codeidxP,DownSampleRate);
             codeidxP = CodeIdxP;
             CarrierNcoPhaseP = carrierNcoP;
             CodeNcoPhaseP = codeNcoP;
 %% late
-            I_InData = I_Data(2048-acqres.cdph+3:2048-acqres.cdph+3+2048*Ms_cnt);
-            Q_InData = Q_Data(2048-acqres.cdph+3:2048-acqres.cdph+3+2048*Ms_cnt);
-            [Il,Ql,codeNcoL,carrierNcoL,CodeIdxL] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseL,CodeNcoPhaseL,Ms_cnt,0,0,codeidxL);
+            I_InData = I_Data(ms_sample-acqres.cdph+3:ms_sample-acqres.cdph+3+ms_sample*Ms_cnt);
+            Q_InData = Q_Data(ms_sample-acqres.cdph+3:ms_sample-acqres.cdph+3+ms_sample*Ms_cnt);
+            [Il,Ql,codeNcoL,carrierNcoL,CodeIdxL] = CorherentSum(I_InData,Q_InData,CAcode1023,CarrierNcoStep,CodeNcoStep,CarrierNcoPhaseL,CodeNcoPhaseL,Ms_cnt,0,0,codeidxL,DownSampleRate);
             codeidxL = CodeIdxL;
             CarrierNcoPhaseL = carrierNcoL;
             CodeNcoPhaseL = codeNcoL;
@@ -245,6 +251,7 @@ for sv=5,
                 sum_20ms_Qp = sum_20ms_Qp + Qp;
                 sum_20ms_Il = sum_20ms_Il + Il;
                 sum_20ms_Ql = sum_20ms_Ql + Ql;
+                noncoh_sum_20ms = noncoh_sum_20ms + (Ip^2+Qp^2);
                 sum_10ms_Ie = sum_10ms_Ie + Ie;
                 sum_10ms_Qe = sum_10ms_Qe + Qe;
                 sum_10ms_Ip = sum_10ms_Ip + Ip;
@@ -280,11 +287,17 @@ for sv=5,
                 end
                 if mod(ms_counter,20) == 0  %20ms code loop
                     magE20ms = sqrt(sum_20ms_Ie^2+sum_20ms_Qe^2);
+                    magP20ms = sqrt(sum_20ms_Ip^2+sum_20ms_Qp^2);
                     magL20ms = sqrt(sum_20ms_Il^2+sum_20ms_Ql^2);
+                    E_buffer = [E_buffer(2:end) magE20ms];
+                    P_buffer = [P_buffer(2:end) magP20ms];
+                    L_buffer = [L_buffer(2:end) magL20ms];
                     delta_cdph2(cntc) = 0.5* (magE20ms - magL20ms) / (magE20ms + magL20ms);
                     cdph_change = delta_cdph2(cntc)*0.2 + (delta_cdph2(cntc) - delta_cdph_old)*0.8;    
 %                     cdph_change = delta_cdph2(cntc)*0.2;
                     delta_cdph_old = delta_cdph2(cntc);
+                    cd_locker = (sum_20ms_Ip^2+sum_20ms_Qp^2)/noncoh_sum_20ms;
+                    CN0 = 10 * log10(1000 * (cd_locker - 1.0)/(20.0 - cd_locker));
                     cntc = cntc + 1;
                     sum_20ms_Ie = 0;
                     sum_20ms_Qe = 0;
@@ -292,13 +305,20 @@ for sv=5,
                     sum_20ms_Qp = 0;
                     sum_20ms_Il = 0;
                     sum_20ms_Ql = 0;
+                    noncoh_sum_20ms = 0;
                     figure(7);
                     plot(delta_cdph2);
                     title('delta cdph2');
+                    figure(8);
+                    plot(E_buffer,'r');
+                    hold on;
+                    plot(P_buffer,'g');
+                    plot(L_buffer,'b');
+                    hold off
                 end
                 I_buffer = [I_buffer(2:end) Ip];
                 Q_buffer = [Q_buffer(2:end) Qp];
-                figure(8);
+                figure(9);
                 plot(I_buffer,'r');
                 hold on;
                 plot(Q_buffer,'b');
@@ -309,8 +329,8 @@ for sv=5,
             Ip_old = Ip;
             Qp_old = Qp;
 %% push data in and do bitsync
-            I_Data = I_Data(2048*Ms_cnt+1:end);
-            Q_Data = Q_Data(2048*Ms_cnt+1:end);
+            I_Data = I_Data(ms_sample*Ms_cnt+1:end);
+            Q_Data = Q_Data(ms_sample*Ms_cnt+1:end);
             if dot_p < 0 && i<501 && bitedge_done == 0
                 bitedge(ms_counter) = bitedge(ms_counter) + 1;
             end
@@ -324,6 +344,7 @@ for sv=5,
                 sum_20ms_Qp = 0;
                 sum_20ms_Il = 0;
                 sum_20ms_Ql = 0;
+                noncoh_sum_20ms = 0;
                 sum_10ms_Ie = 0;
                 sum_10ms_Qe = 0;
                 sum_10ms_Ip = 0;
